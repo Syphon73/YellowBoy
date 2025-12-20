@@ -1,100 +1,151 @@
 #include "raylib.h"
+#include "video.cpp"
+#include <algorithm> // For std::min
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <vector>
+int main(int argc, char *argv[]) {
+  // 1. Load ROM
+  if (argc < 2) {
+    std::cerr << "Usage: ./Game <rom_file>" << std::endl;
+    return 1;
+  }
+  std::string rom_path = argv[1];
+  std::ifstream file(rom_path, std::ios::binary | std::ios::ate);
+  if (!file.is_open())
+    return 1;
 
-//------------------------------------------------------------------------------------
-// Program main entry point
-//------------------------------------------------------------------------------------
-int main(void) {
-  // Initialization
-  //--------------------------------------------------------------------------------------
-  const int screenWidth = 800;
-  const int screenHeight = 450;
+  std::streamsize rom_size = file.tellg();
+  file.seekg(0, std::ios::beg);
+  std::vector<char> buffer(rom_size);
+  if (!file.read(buffer.data(), rom_size))
+    return 1;
 
-  InitWindow(screenWidth, screenHeight, "raylib [core] example - delta time");
+  std::cout << "DEBUG: ROM Loaded. Size: " << rom_size << " bytes."
+            << std::endl;
 
-  int currentFps = 60;
+  // 2. Setup LCD & Palette
+  LCD lcd;
 
-  // Store the position for the both of the circles
-  Vector2 deltaCircle = {0, (float)screenHeight / 3.0f};
-  Vector2 frameCircle = {0, (float)screenHeight * (2.0f / 3.0f)};
-
-  // The speed applied to both circles
-  const float speed = 10.0f;
-  const float circleRadius = 32.0f;
-
-  SetTargetFPS(currentFps);
-  //--------------------------------------------------------------------------------------
-
-  // Main game loop
-  while (!WindowShouldClose()) // Detect window close button or ESC key
-  {
-    // Update
-    //----------------------------------------------------------------------------------
-    // Adjust the FPS target based on the mouse wheel
-    float mouseWheel = GetMouseWheelMove();
-    if (mouseWheel != 0) {
-      currentFps += (int)mouseWheel;
-      if (currentFps < 0)
-        currentFps = 0;
-      SetTargetFPS(currentFps);
-    }
-
-    // GetFrameTime() returns the time it took to draw the last frame, in
-    // seconds (usually called delta time) Uses the delta time to make the
-    // circle look like it's moving at a "consistent" speed regardless of FPS
-
-    // Multiply by 6.0 (an arbitrary value) in order to make the speed
-    // visually closer to the other circle (at 60 fps), for comparison
-    deltaCircle.x += GetFrameTime() * 6.0f * speed;
-    // This circle can move faster or slower visually depending on the FPS
-    frameCircle.x += 0.1f * speed;
-
-    // If either circle is off the screen, reset it back to the start
-    if (deltaCircle.x > screenWidth)
-      deltaCircle.x = 0;
-    if (frameCircle.x > screenWidth)
-      frameCircle.x = 0;
-
-    // Reset both circles positions
-    if (IsKeyPressed(KEY_R)) {
-      deltaCircle.x = 0;
-      frameCircle.x = 0;
-    }
-    //----------------------------------------------------------------------------------
-
-    // Draw
-    //----------------------------------------------------------------------------------
-    BeginDrawing();
-    ClearBackground(RAYWHITE);
-
-    // Draw both circles to the screen
-    DrawCircleV(deltaCircle, circleRadius, RED);
-    DrawCircleV(frameCircle, circleRadius, BLUE);
-
-    // Draw the help text
-    // Determine what help text to show depending on the current FPS target
-    const char *fpsText = 0;
-    if (currentFps <= 0)
-      fpsText = TextFormat("FPS: unlimited (%i)", GetFPS());
-    else
-      fpsText = TextFormat("FPS: %i (target: %i)", GetFPS(), currentFps);
-    DrawText(fpsText, 10, 10, 20, DARKGRAY);
-    DrawText(TextFormat("Frame time: %02.02f ms", GetFrameTime()), 10, 30, 20,
-             DARKGRAY);
-    DrawText("Use the scroll wheel to change the fps limit, r to reset", 10, 50,
-             20, DARKGRAY);
-
-    // Draw the text above the circles
-    DrawText("FUNC: x += GetFrameTime()*speed", 10, 90, 20, RED);
-    DrawText("FUNC: x += speed", 10, 240, 20, BLUE);
-
-    EndDrawing();
-    //----------------------------------------------------------------------------------
+  // Setup Grayscale Palette
+  uint16_t colors[4] = {0x7FFF, 0x5294, 0x294A, 0x0000};
+  for (int c = 0; c < 4; c++) {
+    lcd.bg_palette_ram[c * 2] = colors[c] & 0xFF;
+    lcd.bg_palette_ram[(c * 2) + 1] = (colors[c] >> 8) & 0xFF;
   }
 
-  // De-Initialization
-  //--------------------------------------------------------------------------------------
-  CloseWindow(); // Close window and OpenGL context
-  //--------------------------------------------------------------------------------------
+  // Config LCDC: Enable LCD, Display BG, Unsigned Data ($8000)
+  lcd.lcdc.data = LCDC::LCDEnable | LCDC::BGDisplay | LCDC::TileDataSel;
 
+  // 3. Raylib Init
+  InitWindow(1000, 800, "Game Boy Tile Viewer"); // Bigger window
+  SetTargetFPS(60);
+
+  // Navigation State
+  int rom_offset = 0;
+  int selected_tile_id = 0;
+
+  while (!WindowShouldClose()) {
+    // --- INPUT HANDLING ---
+    // Scroll through ROM in 4KB chunks (Size of one full tile set)
+    if (IsKeyPressed(KEY_RIGHT)) {
+      if (rom_offset + 4096 < rom_size)
+        rom_offset += 4096;
+    }
+    if (IsKeyPressed(KEY_LEFT)) {
+      if (rom_offset - 4096 >= 0)
+        rom_offset -= 4096;
+    }
+
+    // --- INJECTION ---
+    // Copy the current "Page" of the ROM into VRAM for display
+    // We copy 4096 bytes (256 tiles * 16 bytes/tile)
+    int chunk_size = std::min((int)4096, (int)(rom_size - rom_offset));
+
+    // Clear VRAM first (to avoid ghosting if we hit end of file)
+    std::memset(lcd.vram[0], 0, 8192);
+
+    // Inject!
+    for (int i = 0; i < chunk_size; i++) {
+      lcd.vram[0][i] = (uint8_t)buffer[rom_offset + i];
+    }
+
+    // --- DRAWING ---
+    BeginDrawing();
+    ClearBackground(GetColor(0x1a1a1aff)); // Dark Grey background
+
+    // UI Info
+    DrawText(TextFormat("ROM Offset: 0x%X / 0x%X", rom_offset, rom_size), 20,
+             10, 20, LIGHTGRAY);
+    DrawText("Use LEFT/RIGHT Arrows to browse ROM memory", 20, 35, 10, GRAY);
+
+    int start_x = 20;
+    int start_y = 60;
+    int tile_scale = 2;
+
+    // Draw all 256 Tiles (16x16 Grid)
+    for (int tile_id = 0; tile_id < 256; tile_id++) {
+      int grid_x = tile_id % 16;
+      int grid_y = tile_id / 16;
+
+      // Screen position for this tile
+      int draw_pos_x =
+          start_x + (grid_x * 8 * tile_scale) + (grid_x * 2); // +2 for spacing
+      int draw_pos_y = start_y + (grid_y * 8 * tile_scale) + (grid_y * 2);
+
+      // Interaction: Detect Mouse Hover
+      if (GetMouseX() >= draw_pos_x &&
+          GetMouseX() < draw_pos_x + (8 * tile_scale) &&
+          GetMouseY() >= draw_pos_y &&
+          GetMouseY() < draw_pos_y + (8 * tile_scale)) {
+
+        selected_tile_id = tile_id;
+        DrawRectangleLines(draw_pos_x - 1, draw_pos_y - 1, (8 * tile_scale) + 2,
+                           (8 * tile_scale) + 2, YELLOW);
+      }
+
+      // Draw the Tile
+      uint16_t tile_addr = lcd.lcdc.get_tile_data_addr(tile_id);
+      for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+          uint8_t cid = lcd.get_tile_pixel_id(tile_addr, y, x, 0);
+          LCD::Color rgb = lcd.get_bg_color(0, cid);
+
+          DrawRectangle(draw_pos_x + (x * tile_scale),
+                        draw_pos_y + (y * tile_scale), tile_scale, tile_scale,
+                        {rgb.r, rgb.g, rgb.b, 255});
+        }
+      }
+    }
+
+    // --- INSPECTOR PANEL (Right Side) ---
+    int inspect_x = 600;
+    int inspect_y = 100;
+    int inspect_scale = 20;
+
+    DrawText(
+        TextFormat("Tile ID: %d (0x%X)", selected_tile_id, selected_tile_id),
+        inspect_x, inspect_y - 30, 20, WHITE);
+
+    // Draw the selected tile HUGE
+    uint16_t sel_addr = lcd.lcdc.get_tile_data_addr(selected_tile_id);
+    for (int y = 0; y < 8; y++) {
+      for (int x = 0; x < 8; x++) {
+        uint8_t cid = lcd.get_tile_pixel_id(sel_addr, y, x, 0);
+        LCD::Color rgb = lcd.get_bg_color(0, cid);
+
+        DrawRectangle(inspect_x + (x * inspect_scale),
+                      inspect_y + (y * inspect_scale), inspect_scale,
+                      inspect_scale, {rgb.r, rgb.g, rgb.b, 255});
+      }
+    }
+    // Draw border around inspector
+    DrawRectangleLines(inspect_x - 2, inspect_y - 2, (8 * inspect_scale) + 4,
+                       (8 * inspect_scale) + 4, WHITE);
+
+    EndDrawing();
+  }
+  CloseWindow();
   return 0;
 }
