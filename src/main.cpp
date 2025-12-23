@@ -1,151 +1,142 @@
+#include "audio.cpp" // Your APU implementation
 #include "raylib.h"
-#include "video.cpp"
-#include <algorithm> // For std::min
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <vector>
-int main(int argc, char *argv[]) {
-  // 1. Load ROM
-  if (argc < 2) {
-    std::cerr << "Usage: ./Game <rom_file>" << std::endl;
-    return 1;
+
+// ============================================================================
+// GLOBAL STATE
+// ============================================================================
+APU apu;
+const int SAMPLE_RATE = 44100;
+const int CYCLES_PER_SAMPLE = 4194304 / SAMPLE_RATE;
+
+// ============================================================================
+// AUDIO CALLBACK
+// ============================================================================
+void GameAudioCallback(void *buffer, unsigned int frames) {
+  float *d = (float *)buffer;
+  for (unsigned int i = 0; i < frames; i++) {
+    apu.tick(CYCLES_PER_SAMPLE);
+    APU::StereoSample sample = apu.get_sample();
+    d[i * 2] = sample.left;
+    d[i * 2 + 1] = sample.right;
   }
-  std::string rom_path = argv[1];
-  std::ifstream file(rom_path, std::ios::binary | std::ios::ate);
-  if (!file.is_open())
-    return 1;
+}
 
-  std::streamsize rom_size = file.tellg();
-  file.seekg(0, std::ios::beg);
-  std::vector<char> buffer(rom_size);
-  if (!file.read(buffer.data(), rom_size))
-    return 1;
+// ============================================================================
+// HELPER: NOTE FREQUENCIES
+// These are the raw 11-bit values the Game Boy uses for notes
+// Formula: x = 2048 - (131072 / Frequency)
+// ============================================================================
+const int NOTE_E5 = 1650;
+const int NOTE_B4 = 1546;
+const int NOTE_C5 = 1576;
+const int NOTE_D5 = 1602;
+const int NOTE_A4 = 1496;
+const int NOTE_G4 = 1428;
+const int NOTE_F4 = 1360; // Approximate
 
-  std::cout << "DEBUG: ROM Loaded. Size: " << rom_size << " bytes."
-            << std::endl;
+struct Note {
+  int frequency; // The raw 11-bit value
+  int duration;  // In frames (60ths of a second)
+};
 
-  // 2. Setup LCD & Palette
-  LCD lcd;
+// THE TETRIS THEME (Korobeiniki)
+// Melody: E -> B -> C -> D -> C -> B -> A ...
+std::vector<Note> tetris_melody = {
+    {NOTE_E5, 20}, {NOTE_B4, 10}, {NOTE_C5, 10}, {NOTE_D5, 20}, {NOTE_C5, 10},
+    {NOTE_B4, 10}, {NOTE_A4, 20}, {NOTE_A4, 10}, {NOTE_C5, 10}, {NOTE_E5, 20},
+    {NOTE_D5, 10}, {NOTE_C5, 10}, {NOTE_B4, 30}, {NOTE_C5, 10}, {NOTE_D5, 20},
+    {NOTE_E5, 20}, {NOTE_C5, 20}, {NOTE_A4, 20}, {NOTE_A4, 40}, {0, 10}, // Rest
+    {NOTE_D5, 20}, {NOTE_F4, 10}, {NOTE_A4, 20}, {NOTE_G4, 10}, {NOTE_F4, 10},
+    {NOTE_E5, 30}, {NOTE_C5, 10}, {NOTE_E5, 20}, {NOTE_D5, 10}, {NOTE_C5, 10},
+    {NOTE_B4, 20}, {NOTE_B4, 10}, {NOTE_C5, 10}, {NOTE_D5, 20}, {NOTE_E5, 20},
+    {NOTE_C5, 20}, {NOTE_A4, 20}, {NOTE_A4, 40}};
 
-  // Setup Grayscale Palette
-  uint16_t colors[4] = {0x7FFF, 0x5294, 0x294A, 0x0000};
-  for (int c = 0; c < 4; c++) {
-    lcd.bg_palette_ram[c * 2] = colors[c] & 0xFF;
-    lcd.bg_palette_ram[(c * 2) + 1] = (colors[c] >> 8) & 0xFF;
+int current_note_index = 0;
+int note_timer = 0;
+
+// ============================================================================
+// PLAY NEXT NOTE LOGIC
+// This mimics the Game Boy Sound Engine updates
+// ============================================================================
+void UpdateMusic() {
+  if (note_timer > 0) {
+    note_timer--;
+    return;
   }
 
-  // Config LCDC: Enable LCD, Display BG, Unsigned Data ($8000)
-  lcd.lcdc.data = LCDC::LCDEnable | LCDC::BGDisplay | LCDC::TileDataSel;
+  // Get the next note
+  Note n = tetris_melody[current_note_index];
+  current_note_index = (current_note_index + 1) % tetris_melody.size();
 
-  // 3. Raylib Init
-  InitWindow(1000, 800, "Game Boy Tile Viewer"); // Bigger window
+  // Reset timer
+  note_timer = n.duration;
+
+  if (n.frequency == 0) {
+    // Rest (Silence)
+    // We set volume to 0 (Envelope 0, Direction 0)
+    apu.write_byte(0xFF12, 0x00);
+    apu.write_byte(0xFF14, 0x80); // Trigger to apply
+  } else {
+    // Play Note on Channel 1
+    // NR10: Sweep Off
+    apu.write_byte(0xFF10, 0x00);
+
+    // NR11: Duty 50% (0x80), Length doesn't matter much here
+    apu.write_byte(0xFF11, 0x80);
+
+    // NR12: Volume 10 (0xA), Decay (0), Speed 2
+    // This gives it that "plucky" Game Boy sound
+    apu.write_byte(0xFF12, 0xA2);
+
+    // NR13: Frequency Low Byte
+    apu.write_byte(0xFF13, n.frequency & 0xFF);
+
+    // NR14: Frequency High + Trigger (0x80)
+    apu.write_byte(0xFF14, 0x80 | ((n.frequency >> 8) & 0x07));
+  }
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+int main() {
+  InitWindow(400, 300, "Tetris Theme Test");
+  InitAudioDevice();
   SetTargetFPS(60);
 
-  // Navigation State
-  int rom_offset = 0;
-  int selected_tile_id = 0;
+  // Initial APU Setup
+  apu.write_byte(0xFF26, 0x80); // Power On
+  apu.write_byte(0xFF25, 0x11); // Pan Ch1 to Left & Right (Bit 0 and 4)
+  apu.write_byte(0xFF24, 0x77); // Master Vol Max
+
+  AudioStream stream = LoadAudioStream(SAMPLE_RATE, 32, 2);
+  SetAudioStreamCallback(stream, GameAudioCallback);
+  PlayAudioStream(stream);
 
   while (!WindowShouldClose()) {
-    // --- INPUT HANDLING ---
-    // Scroll through ROM in 4KB chunks (Size of one full tile set)
-    if (IsKeyPressed(KEY_RIGHT)) {
-      if (rom_offset + 4096 < rom_size)
-        rom_offset += 4096;
-    }
-    if (IsKeyPressed(KEY_LEFT)) {
-      if (rom_offset - 4096 >= 0)
-        rom_offset -= 4096;
-    }
 
-    // --- INJECTION ---
-    // Copy the current "Page" of the ROM into VRAM for display
-    // We copy 4096 bytes (256 tiles * 16 bytes/tile)
-    int chunk_size = std::min((int)4096, (int)(rom_size - rom_offset));
+    // Run our fake "Sound Engine" once per frame (60Hz)
+    UpdateMusic();
 
-    // Clear VRAM first (to avoid ghosting if we hit end of file)
-    std::memset(lcd.vram[0], 0, 8192);
-
-    // Inject!
-    for (int i = 0; i < chunk_size; i++) {
-      lcd.vram[0][i] = (uint8_t)buffer[rom_offset + i];
-    }
-
-    // --- DRAWING ---
     BeginDrawing();
-    ClearBackground(GetColor(0x1a1a1aff)); // Dark Grey background
+    ClearBackground(RAYWHITE);
+    DrawText("Playing: Tetris Theme (Korobeiniki)", 20, 100, 20, DARKGRAY);
+    DrawText("Channel 1: Square Wave 50%", 20, 130, 10, GRAY);
 
-    // UI Info
-    DrawText(TextFormat("ROM Offset: 0x%X / 0x%X", rom_offset, rom_size), 20,
-             10, 20, LIGHTGRAY);
-    DrawText("Use LEFT/RIGHT Arrows to browse ROM memory", 20, 35, 10, GRAY);
-
-    int start_x = 20;
-    int start_y = 60;
-    int tile_scale = 2;
-
-    // Draw all 256 Tiles (16x16 Grid)
-    for (int tile_id = 0; tile_id < 256; tile_id++) {
-      int grid_x = tile_id % 16;
-      int grid_y = tile_id / 16;
-
-      // Screen position for this tile
-      int draw_pos_x =
-          start_x + (grid_x * 8 * tile_scale) + (grid_x * 2); // +2 for spacing
-      int draw_pos_y = start_y + (grid_y * 8 * tile_scale) + (grid_y * 2);
-
-      // Interaction: Detect Mouse Hover
-      if (GetMouseX() >= draw_pos_x &&
-          GetMouseX() < draw_pos_x + (8 * tile_scale) &&
-          GetMouseY() >= draw_pos_y &&
-          GetMouseY() < draw_pos_y + (8 * tile_scale)) {
-
-        selected_tile_id = tile_id;
-        DrawRectangleLines(draw_pos_x - 1, draw_pos_y - 1, (8 * tile_scale) + 2,
-                           (8 * tile_scale) + 2, YELLOW);
-      }
-
-      // Draw the Tile
-      uint16_t tile_addr = lcd.lcdc.get_tile_data_addr(tile_id);
-      for (int y = 0; y < 8; y++) {
-        for (int x = 0; x < 8; x++) {
-          uint8_t cid = lcd.get_tile_pixel_id(tile_addr, y, x, 0);
-          LCD::Color rgb = lcd.get_bg_color(0, cid);
-
-          DrawRectangle(draw_pos_x + (x * tile_scale),
-                        draw_pos_y + (y * tile_scale), tile_scale, tile_scale,
-                        {rgb.r, rgb.g, rgb.b, 255});
-        }
+    // Visualizer bar based on current frequency
+    if (current_note_index > 0) {
+      int freq = tetris_melody[current_note_index - 1].frequency;
+      if (freq > 0) {
+        float height = (freq - 1300) / 2.0f;
+        DrawRectangle(150, 200 - height, 50, height, RED);
       }
     }
-
-    // --- INSPECTOR PANEL (Right Side) ---
-    int inspect_x = 600;
-    int inspect_y = 100;
-    int inspect_scale = 20;
-
-    DrawText(
-        TextFormat("Tile ID: %d (0x%X)", selected_tile_id, selected_tile_id),
-        inspect_x, inspect_y - 30, 20, WHITE);
-
-    // Draw the selected tile HUGE
-    uint16_t sel_addr = lcd.lcdc.get_tile_data_addr(selected_tile_id);
-    for (int y = 0; y < 8; y++) {
-      for (int x = 0; x < 8; x++) {
-        uint8_t cid = lcd.get_tile_pixel_id(sel_addr, y, x, 0);
-        LCD::Color rgb = lcd.get_bg_color(0, cid);
-
-        DrawRectangle(inspect_x + (x * inspect_scale),
-                      inspect_y + (y * inspect_scale), inspect_scale,
-                      inspect_scale, {rgb.r, rgb.g, rgb.b, 255});
-      }
-    }
-    // Draw border around inspector
-    DrawRectangleLines(inspect_x - 2, inspect_y - 2, (8 * inspect_scale) + 4,
-                       (8 * inspect_scale) + 4, WHITE);
-
     EndDrawing();
   }
+
+  CloseAudioDevice();
   CloseWindow();
   return 0;
 }
