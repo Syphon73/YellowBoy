@@ -1,5 +1,6 @@
 #include "raylib.h"
 #include "video.cpp"
+#include "Bus.hpp"
 #include <algorithm> // For std::min
 #include <fstream>
 #include <iomanip>
@@ -41,6 +42,8 @@ int main(int argc, char *argv[]) {
   // 3. Raylib Init
   InitWindow(1000, 800, "Game Boy Tile Viewer"); // Bigger window
   SetTargetFPS(60);
+
+  //bus.loadROM(buffer);
 
   // Navigation State
   int rom_offset = 0;

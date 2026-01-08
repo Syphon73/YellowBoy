@@ -1,0 +1,16 @@
+
+(shifa part)
+
+steps: 
+	- decode instructions from the machine code 
+	- keep time clock synchronised
+
+/src: 
+	- main (load rom, start game loop)
+	- cpu (implement registers, fetch-decode-execute instr set)(double speed mode)
+	- bus (memory mapping)(recieve memory addr from cpu and routing)
+	- cartrige (header parsing)(memory bank controll)
+	- PPU/GPU (layers, tiles, CGB Palettes)
+	- timer/joypad
+	- frontend (raylib etc for rendering)
+
