@@ -1,5 +1,5 @@
 //https://gbdev.io/pandocs/Memory_Map.html
-#include "Bus.hpp"
+#include "Bus.h"
 #include <iostream>
 #include <algorithm>
 
@@ -32,15 +32,15 @@ uint8_t Bus::read(uint16_t address) {
     }
     else if (address >= 0x8000 && address <= 0x9FFF) {
 
-	// VRAM (Video RAM) - Eventually route this to PPU
-	if(address >= 0x8000 && address <= 0x97FF){
-		// Tile RAM
-		return memory[address];
-	}
-	else{
-		//background mapping (map tiles to section of screen)
-		return memory[address];
-	}
+	    // VRAM (Video RAM) - Eventually route this to PPU
+	    if(address >= 0x8000 && address <= 0x97FF){
+		    // Tile RAM
+		    return memory[address];
+	    }
+	    else{
+		    //background mapping (map tiles to section of screen)
+		    return memory[address];
+	    }
     }
     else if (address >= 0xA000 && address <= 0xBFFF) {
         // External RAM (Cartridge RAM)
@@ -51,24 +51,24 @@ uint8_t Bus::read(uint16_t address) {
         return memory[address];
     }
     else if(address >= 0xE000 && address <= 0xFDFF){
-	//prohibited area - Echo RAM
-	return memory[address];
+	    //prohibited area - Echo RAM
+	    return memory[address];
     }
     else if(address >= 0xFE00 && address <= 0xFE9F){
-	//OAM - object memory attribute
-	return memory[address];
+	    //OAM - object memory attribute
+	    return memory[address];
     }
     else if (address >= 0xFEA0 && address <= 0xFEFF) {
         // not usable area
         return memory[address];
     }
     else if(address >= 0xFF00 && address <= 0xFF7F){
-	//I/O registers
-	return memory[address];
+	    //I/O registers
+	    return memory[address];
     }
     else if(address >= 0xFF80 && address <= 0xFFFE){
-	//HRAM
-	return memory[address];
+	    //HRAM
+	    return memory[address];
     }
     else {
         // FFFF - interrupt enable registers
