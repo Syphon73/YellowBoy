@@ -1,5 +1,5 @@
 //https://gbdev.io/pandocs/Memory_Map.html
-#include "Bus.h"
+#include "bus.h"
 #include <iostream>
 #include <algorithm>
 
