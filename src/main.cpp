@@ -1,5 +1,6 @@
 #include "audio.cpp" // Your APU implementation
 #include "raylib.h"
+#include "bus.h"
 #include <iostream>
 #include <vector>
 
@@ -105,6 +106,8 @@ int main() {
   InitWindow(400, 300, "Tetris Theme Test");
   InitAudioDevice();
   SetTargetFPS(60);
+
+  //bus.loadROM(buffer);
 
   // Initial APU Setup
   apu.write_byte(0xFF26, 0x80); // Power On
