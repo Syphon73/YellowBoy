@@ -1,4 +1,4 @@
-// https://gbdev.io/pandocs/Memory_Map.html
+//https://gbdev.io/pandocs/Memory_Map.html
 #include "Bus.hpp"
 #include <iostream>
 #include <algorithm>
