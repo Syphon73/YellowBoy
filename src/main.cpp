@@ -1,6 +1,6 @@
 #include "raylib.h"
 #include "video.cpp"
-#include "Bus.hpp"
+#include "Bus.h"
 #include <algorithm> // For std::min
 #include <fstream>
 #include <iomanip>
