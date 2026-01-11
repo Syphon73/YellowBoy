@@ -1,1 +1,1 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/Game.dir/link.d CMakeFiles/Game.dir/src/main.cpp.o -o Game  /usr/lib/libraylib.so -L/usr/lib -lraylib
+/usr/bin/c++ CMakeFiles/Game.dir/src/main.cpp.o -o Game  /usr/local/lib/libraylib.a -lm 
